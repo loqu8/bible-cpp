@@ -173,16 +173,16 @@ When wrapped in an MCP server (Layer 3 CAPI → MCP tools), this enables:
 
 ## Project Status
 
-**Phase**: Initial architecture and interface design.
+**Phase**: Engine complete, data pipeline operational. Next: nomad-builder integration.
 
 - [x] Architecture design (plugin model, schema, CAPI pattern)
-- [ ] Core types and interfaces (`types.hpp`, `scripture_plugin.hpp`)
-- [ ] Reference parser (`reference.hpp/cpp`)
-- [ ] SQLite query layer (navigation, search)
-- [ ] Strong's lexicon integration (STEPBible TBESG/TBESH)
-- [ ] Build tools (data pipeline: raw sources → SQLite)
-- [ ] Statistics / analytics
-- [ ] Tests
+- [x] Core types and interfaces (`types.hpp`, `scripture_plugin.hpp`)
+- [x] Reference parser (`reference.hpp/cpp`) — English, Chinese, abbreviations
+- [x] SQLite query layer (navigation, search, parallel text)
+- [x] Strong's lexicon integration (STEPBible TBESG/TBESH)
+- [x] Build tools (`tools/build_bible_db.py` — auto-downloads + builds 4 databases)
+- [x] Statistics / analytics (AI/MCP-ready corpus metadata)
+- [x] Tests (37 passing — strongs parser + full engine integration)
 - [ ] nomad-builder integration (Layer 2 + Layer 3 CAPI)
 
 ## License

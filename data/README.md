@@ -1,47 +1,41 @@
 # Data Sources
 
-This directory contains tools and instructions for building the scripture databases.
+This directory contains the generated scripture databases and the build tool.
 
-## Strong's Lexicon
-
-Source: [STEPBible-Data](https://github.com/STEPBible/STEPBible-Data) (CC BY 4.0)
-
-1. Download TBESG (Greek) and TBESH (Hebrew) from the Lexicons directory
-2. Run `tools/build_strongs_db.py` to convert TSV → SQLite
+## Quick Start
 
 ```bash
-python3 tools/build_strongs_db.py \
-    --hebrew data/raw/TBESH.txt \
-    --greek data/raw/TBESG.txt \
-    --output data/strongs.sqlite
+# Auto-download all sources and build all 4 databases
+python3 tools/build_bible_db.py
+
+# Custom output directory
+python3 tools/build_bible_db.py --output-dir /path/to/output
+
+# Use pre-downloaded raw files (cached in data/raw/ by default)
+python3 tools/build_bible_db.py --data-dir /path/to/cached/raw
 ```
 
-## KJV Plugin
+## Output Databases
 
-Source: Bible SuperSearch (public domain text)
+| File | Content | Verses | Strong's |
+|------|---------|--------|----------|
+| `kjv.sqlite` | King James Version (English) | 31,102 | Yes |
+| `cuv_simp.sqlite` | Chinese Union Version — Simplified | 31,100 | Yes |
+| `cuv_trad.sqlite` | Chinese Union Version — Traditional | 31,100 | Yes |
+| `strongs.sqlite` | Hebrew + Greek Strong's lexicon | — | 19,570 entries |
 
-The KJV text with Strong's markers is available from biblesupersearch.com
-in SQLite format. Run the conversion tool to produce a plugin database:
+All databases conform to the bible-cpp plugin schema (see [../README.md](../README.md)).
 
-```bash
-python3 tools/build_kjv_plugin.py \
-    --source data/raw/kjv_strongs.sqlite \
-    --output data/kjv.sqlite
-```
+## Sources
 
-## CUV Plugin (Chinese Union Version)
-
-Source: Bible SuperSearch (public domain text, 1919)
-
-Available in simplified and traditional variants:
-
-```bash
-python3 tools/build_cuv_plugin.py \
-    --source-simp data/raw/chinese_union_simp_s.sqlite \
-    --source-trad data/raw/chinese_union_trad_s.sqlite \
-    --output-simp data/cuv_simp.sqlite \
-    --output-trad data/cuv_trad.sqlite
-```
+| Dataset | Source | License |
+|---------|--------|---------|
+| KJV + Strong's | [Bible SuperSearch](https://github.com/aicwebtech/biblesupersearch_api) | Public Domain |
+| CUV Simplified + Strong's | [Bible SuperSearch](https://github.com/aicwebtech/biblesupersearch_api) | Public Domain |
+| CUV Traditional + Strong's | [Bible SuperSearch](https://github.com/aicwebtech/biblesupersearch_api) | Public Domain |
+| Hebrew Strong's (TBESH) | [STEPBible-Data](https://github.com/STEPBible/STEPBible-Data) | CC BY 4.0 |
+| Greek Strong's (TBESG) | [STEPBible-Data](https://github.com/STEPBible/STEPBible-Data) | CC BY 4.0 |
+| Pronunciation data | [Bible SuperSearch](https://github.com/aicwebtech/biblesupersearch_api) | Public Domain |
 
 ## Adding Your Own Translation
 
@@ -54,10 +48,12 @@ Example: to add the Russian Synodal Bible, create `synodal.sqlite` with:
 ```sql
 CREATE TABLE books (
     id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,        -- "Бытие", "Исход", etc.
-    name_alt TEXT,
-    abbr TEXT NOT NULL,        -- "Быт", "Исх", etc.
-    testament TEXT,
+    name_en TEXT NOT NULL,
+    name_zh TEXT NOT NULL,
+    name_zh_trad TEXT NOT NULL,
+    abbr_en TEXT NOT NULL,
+    testament TEXT NOT NULL,
+    canon TEXT NOT NULL DEFAULT 'protestant',
     chapter_count INTEGER NOT NULL
 );
 
@@ -72,4 +68,12 @@ CREATE TABLE verses (
 );
 ```
 
-Populate with your translation data, then register the plugin in your application.
+Populate with your translation data, then register the plugin:
+
+```cpp
+engine.register_plugin("synodal", "/path/to/synodal.sqlite", {
+    .language = "ru",
+    .name = "Synodal Translation",
+    .has_strongs = false
+});
+```
