@@ -1,3 +1,7 @@
+# Srclight / Codelight index
+.srclight/
+.codelight/
+
 # Build
 build/
 cmake-build-*/
