@@ -1,7 +1,7 @@
 /// @file strongs_parser.cpp
 /// @brief Strong's text parser and helper implementations.
 
-#include "bible/types.hpp"
+#include "bible/bible.hpp"
 
 #include <charconv>
 
