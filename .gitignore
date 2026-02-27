@@ -1,0 +1,19 @@
+# Build
+build/
+cmake-build-*/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Data files (large, downloaded by build scripts)
+data/raw/
+data/*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
