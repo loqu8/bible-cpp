@@ -1,16 +1,14 @@
 /// @file reference.cpp
-/// @brief Scripture reference parsing.
+/// @brief Scripture reference parsing — placeholder.
 ///
-/// Parses strings like "John 3:16", "Gen 1:1-3", "约翰福音 3:16", "Быт 1:1"
-/// into structured Reference objects.
-///
-/// TODO: Full implementation with locale-aware book name lookup tables.
+/// parse_reference() and format_reference() are implemented in bible.cpp
+/// because they need access to the Impl struct (book_name_index, book_cache).
+/// This file is retained for future reference helpers that don't need Impl.
 
 #include "bible/bible.hpp"
 
 namespace bible {
 
-// Placeholder — full implementation will use book name tables
-// from registered plugins to resolve abbreviations in any language.
+// All reference methods are in bible.cpp (they need Impl access).
 
 }  // namespace bible
