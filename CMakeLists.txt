@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(bible-cpp
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Pure C++20 parallel-text scripture engine"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
@@ -37,14 +37,31 @@ target_include_directories(bible
 
 target_compile_features(bible PUBLIC cxx_std_20)
 
-# SQLite: find system or vendored
+# SQLite: find system or use vendored amalgamation
 find_package(SQLite3 QUIET)
 if(SQLite3_FOUND)
-    target_link_libraries(bible PRIVATE SQLite::SQLite3)
+    set(BIBLE_SQLITE_TARGET SQLite::SQLite3)
+    message(STATUS "Using system SQLite3 ${SQLite3_VERSION}")
 else()
-    message(STATUS "SQLite3 not found via find_package; expecting vendored sqlite3")
-    # Vendored SQLite will be added here when available
+    message(STATUS "SQLite3 not found; using vendored amalgamation")
+    add_library(sqlite3_vendored STATIC third_party/sqlite/sqlite3.c)
+    target_include_directories(sqlite3_vendored PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(sqlite3_vendored PRIVATE
+        SQLITE_ENABLE_FTS5
+        SQLITE_DQS=0
+        SQLITE_OMIT_DEPRECATED
+        SQLITE_THREADSAFE=0
+    )
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(sqlite3_vendored PRIVATE dl pthread)
+    endif()
+    set(BIBLE_SQLITE_TARGET sqlite3_vendored)
 endif()
+
+target_link_libraries(bible PRIVATE ${BIBLE_SQLITE_TARGET})
 
 # ---------------------------------------------------------------------------
 # Install
@@ -52,7 +69,12 @@ endif()
 
 include(GNUInstallDirs)
 
-install(TARGETS bible
+set(BIBLE_INSTALL_TARGETS bible)
+if(TARGET sqlite3_vendored)
+    list(APPEND BIBLE_INSTALL_TARGETS sqlite3_vendored)
+endif()
+
+install(TARGETS ${BIBLE_INSTALL_TARGETS}
     EXPORT BibleCppTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
