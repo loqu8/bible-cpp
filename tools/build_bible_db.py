@@ -262,10 +262,27 @@ def clean_cuv(text):
 
 def strip_html(text):
     """Strip HTML tags and decode entities."""
+    # Replace <BR> / <br> / <br /> with newline before stripping other tags
+    text = re.sub(r'<[Bb][Rr]\s*/?>', '\n', text)
     text = re.sub(r'<[^>]+>', '', text)
     text = html.unescape(text)
-    # Normalize whitespace
-    text = re.sub(r'\s+', ' ', text)
+    # Clean up STEPBible/openscriptures indentation markers:
+    # __1. → 1)  __2. → 2)  (numbered sections with period)
+    # __1 __2 (numbered without period) → 1. 2.
+    # __I. __II. (roman numerals) → I. II.
+    # __(a) __(b) __(1) __(i) __(α) etc. → (a) (b) etc.
+    # __α __β __γ (Greek letters) → α. β. γ.
+    text = re.sub(r'__(\d+)\.', r'\1)', text)
+    text = re.sub(r'__(\d+)(?=\s)', r'\1.', text)
+    text = re.sub(r'__(I{1,3}V?|VI{0,3})\.', r'\1.', text)
+    text = re.sub(r'__(\([^)]+\))', r'\1', text)
+    text = re.sub(r'__([α-ωΑ-Ω])', r'\1.', text)
+    # Catch-all: bare __ at start of line (indent-only markers)
+    text = re.sub(r'__ ', ' ', text)
+    # Normalize whitespace within each line (preserve newlines)
+    text = '\n'.join(
+        re.sub(r'[ \t]+', ' ', line).strip() for line in text.split('\n')
+    )
     return text.strip()
 
 # ---------------------------------------------------------------------------
