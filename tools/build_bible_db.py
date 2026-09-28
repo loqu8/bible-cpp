@@ -236,6 +236,16 @@ def extract_verses_txt(zip_path):
 # Text processing
 # ---------------------------------------------------------------------------
 
+def repair_tvm_tags(text):
+    """Restore the opening parenthesis on damaged TVM codes: {H8798)} -> {(H8798)}.
+
+    The Bible SuperSearch KJV module (2021-09-28) has 2,485 of these, all in
+    Psalms 35-94, all H8675-H8804. Left alone they match neither tag pattern
+    and leak into both text and text_plain.
+    """
+    return re.sub(r'\{([HG]\d+)\)\}', r'{(\1)}', text)
+
+
 def strip_morphology(text):
     """Remove morphology codes {(H####)} from Strong's-tagged text."""
     return re.sub(r'\{\([HG]\d+\)\}', '', text)
@@ -310,7 +320,7 @@ def parse_bss_module(verses_txt):
         except ValueError:
             continue
 
-        raw_text = parts[3]
+        raw_text = repair_tvm_tags(parts[3])
         # Strip morphology codes, keep lexical Strong's
         text = strip_morphology(raw_text)
         text_plain = strip_strongs(raw_text)
