@@ -15,6 +15,20 @@ Run tests:
 cd build && ctest --output-on-failure
 ```
 
+## Data Build
+
+```bash
+python3 -m unittest tools.test_build_bible_db   # KJV repairs, corpus-wide checks
+python3 tools/build_bible_db.py                  # data/*.sqlite from data/raw/
+```
+
+The KJV source (Bible SuperSearch) needs repair before use: broken TVM tags,
+unspaced parentheses, and two approved wording fixes (`KJV_CORRECTIONS`). Psalm
+titles and epistle subscriptions stay in the verse text; the `heading` /
+`subscription` columns mark the split, located from eBible's USFM (sha256 pinned).
+Downstream is `bible/tools/build_bible_db.sh` → `bible.sqlite` → `bible.xdb`
+(see `bible/docs/areas/architecture.md`). Diff every rebuild against a backup.
+
 ## Project Structure
 
 - `include/bible/` — Public headers

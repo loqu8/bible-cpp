@@ -19,6 +19,7 @@ All sources are public domain (Bible text) or CC BY 4.0 (STEPBible lexicons).
 """
 
 import argparse
+import hashlib
 import csv
 import html
 import io
@@ -62,12 +63,18 @@ URLS = {
         "Lexicons/TBESG%20-%20Translators%20Brief%20lexicon%20of%20Extended"
         "%20Strongs%20for%20Greek%20-%20STEPBible.org%20CC%20BY.txt"
     ),
+    # eBible KJV USFM (public domain): marks psalm titles (\d) and the
+    # Psalm 119 letters (\s1), which the SuperSearch text folds into verse 1.
+    "eng-kjv_usfm.zip": "https://ebible.org/Scriptures/eng-kjv_usfm.zip",
     # Bible SuperSearch Strong's definitions (pronunciation data)
     "strongs_definitions.csv": (
         "https://raw.githubusercontent.com/aicwebtech/biblesupersearch_api/"
         "master/database/dumps/strongs_definitions.csv"
     ),
 }
+
+# Boundaries only are read from this file, so pin the edition they were checked against.
+EBIBLE_USFM_SHA256 = "1bab5d4d030439831fc0b39d7f11001dd8527fc6277405e7f6512273c200c3a4"
 
 # ---------------------------------------------------------------------------
 # 66-book metadata (Protestant canon)
@@ -168,6 +175,8 @@ CREATE TABLE verses (
     verse INTEGER NOT NULL,
     text TEXT,
     text_plain TEXT,
+    heading TEXT,       -- KJV: psalm title / Psalm 119 letter that opens text_plain
+    subscription TEXT,  -- KJV: epistle subscription that closes text_plain
     UNIQUE(book, chapter, verse)
 );
 
@@ -236,6 +245,141 @@ def extract_verses_txt(zip_path):
 # Text processing
 # ---------------------------------------------------------------------------
 
+# Wording corrections to the SuperSearch KJV, applied to the raw source line.
+# Each must match exactly once or the build fails. Approved by Tim, 2026-09-28,
+# after a cross-check against eBible eng-kjv.
+KJV_CORRECTIONS = {
+    # Standard KJV prints "Abidah" here; "Abida" is 1 Chr 1:33.
+    (1, 25, 4): [("Abida{H28}", "Abidah{H28}")],
+    # The only italic the source marks with parentheses; render it unmarked
+    # like every other KJV italic.
+    (62, 2, 23): [("Father{G3962}:(but) he", "Father{G3962}: but he")],
+}
+
+
+def apply_corrections(ref, text, corrections):
+    """Apply the corrections listed for ref (book, chapter, verse)."""
+    for old, new in corrections.get(ref, ()):
+        if text.count(old) != 1:
+            raise ValueError(f"KJV correction for {ref} no longer matches: {old!r}")
+        text = text.replace(old, new)
+    return text
+
+
+USFM_BOOKS = (
+    "GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB "
+    "PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP "
+    "HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI "
+    "2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV"
+).split()
+
+
+def _usfm_text(s):
+    """Reduce a USFM line to its plain words."""
+    s = re.sub(r'\\f .*?\\f\*', '', s)
+    s = re.sub(r'\\\+?w ([^|\\]*)\|[^\\]*\\\+?w\*', r'\1', s)
+    s = re.sub(r'\\\+?[a-z]+\d?\*?', '', s)
+    s = re.sub(r'[\u05d0-\u05ea]', '', s)  # Hebrew letter printed beside ALEPH etc.
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def parse_usfm_headings(zip_path):
+    """Read eBible KJV USFM: {(book, chapter, verse): heading} for the verse
+    each psalm title (\\d) or Psalm 119 letter (\\s1 in Psalms) precedes."""
+    headings = {}
+    with zipfile.ZipFile(zip_path) as zf:
+        for name in zf.namelist():
+            m = re.match(r'\d+-(\w{3})eng-kjv\.usfm$', name)
+            if not m or m.group(1) not in USFM_BOOKS:
+                continue
+            book = USFM_BOOKS.index(m.group(1)) + 1
+            chapter, pending = 0, None
+            for line in zf.read(name).decode('utf-8-sig').splitlines():
+                if line.startswith('\\c '):
+                    chapter = int(line.split()[1])
+                elif line.startswith('\\d '):
+                    pending = _usfm_text(line[3:])
+                elif book == 19 and line.startswith('\\s1 '):
+                    pending = _usfm_text(line[4:])
+                v = re.search(r'\\v (\d+)', line)
+                if v and pending:
+                    headings[(book, chapter, int(v.group(1)))] = pending
+                    pending = None
+    return headings
+
+
+def _letters(s):
+    return re.sub(r'[^a-z]', '', s.lower().replace('\u00e6', 'ae'))
+
+
+def split_heading(text_plain, heading):
+    """Return the prefix of text_plain that is heading, in our own spelling.
+
+    Editions differ in hyphens, italics brackets and ligatures, so the match
+    is on letters alone and must be exact."""
+    want = len(_letters(heading))
+    i = seen = 0
+    while seen < want and i < len(text_plain):
+        if _letters(text_plain[i]):
+            seen += 1
+        i += 1
+    while i < len(text_plain) and not text_plain[i].isspace():
+        i += 1
+    ours = text_plain[:i].strip()
+    if _letters(ours) != _letters(heading) or not text_plain[i:].strip():
+        raise ValueError(f"heading {heading!r} does not prefix {text_plain[:80]!r}")
+    return ours
+
+
+def split_subscription(text_plain):
+    """Return the epistle subscription after a closing "Amen.", or None."""
+    m = re.search(r'\bAmen\.\s+(\S.*)$', text_plain)
+    return m.group(1) if m else None
+
+
+def kjv_notes(verses, headings, expect=(138, 14)):
+    """{(book, chapter, verse): (heading, subscription)} for the KJV verses that
+    carry a psalm title / Psalm 119 letter first or an epistle subscription last.
+    The text itself is left whole; these columns say where it divides."""
+    plain = {(b, c, v): p for b, c, v, _, p in verses}
+    last = {}
+    for b, c, v in plain:
+        last[b] = max(last.get(b, (0, 0)), (c, v))
+    notes = {}
+    for key, heading in headings.items():
+        notes[key] = (split_heading(plain[key], heading), None)
+    for b, (c, v) in last.items():
+        sub = split_subscription(plain[(b, c, v)])
+        if sub:
+            notes[(b, c, v)] = (notes.get((b, c, v), (None, None))[0], sub)
+    found = (sum(1 for h, _ in notes.values() if h), sum(1 for _, s in notes.values() if s))
+    if found != expect:
+        raise ValueError(f"KJV notes: expected {expect} headings/subscriptions, found {found}")
+    return notes
+
+
+def repair_tvm_tags(text):
+    """Restore the opening parenthesis on damaged TVM codes: {H8798)} -> {(H8798)}.
+
+    The Bible SuperSearch KJV module (2021-09-28) has 2,485 of these, all in
+    Psalms 35-94, all H8675-H8804. Left alone they match neither tag pattern
+    and leak into both text and text_plain.
+    """
+    return re.sub(r'\{([HG]\d+)\)\}', r'{(\1)}', text)
+
+
+def normalise_paren_spacing(text):
+    """Space a KJV parenthesis the way printed editions do: "Bela (the same".
+
+    The SuperSearch KJV module glues the opening parenthesis to the preceding
+    word ("Casluhim,(out", "Bela{H1106}(the") in ~150 places and pads it on
+    the inside ("thither,( is", "( For") in 8. The TVM tag "{(" is left alone,
+    so run repair_tvm_tags() first.
+    """
+    text = re.sub(r'\(\s+', '(', text)
+    return re.sub(r'(?<=[^\s{])\(', ' (', text)
+
+
 def strip_morphology(text):
     """Remove morphology codes {(H####)} from Strong's-tagged text."""
     return re.sub(r'\{\([HG]\d+\)\}', '', text)
@@ -289,8 +433,13 @@ def strip_html(text):
 # Bible SuperSearch module parser
 # ---------------------------------------------------------------------------
 
-def parse_bss_module(verses_txt):
+def parse_bss_module(verses_txt, space_parens=False, corrections=None):
     """Parse Bible SuperSearch pipe-separated verses.txt.
+
+    space_parens: apply normalise_paren_spacing() (English only; CUV
+    parentheses follow Chinese typography and take no space).
+    corrections: {(book, chapter, verse): [(old, new), ...]} applied to the raw
+    line first (see KJV_CORRECTIONS).
 
     Format: book|chapter|verse|text|italics|strongs
     Returns list of (book, chapter, verse, text, text_plain).
@@ -311,6 +460,11 @@ def parse_bss_module(verses_txt):
             continue
 
         raw_text = parts[3]
+        if corrections:
+            raw_text = apply_corrections((book, chapter, verse), raw_text, corrections)
+        raw_text = repair_tvm_tags(raw_text)
+        if space_parens:
+            raw_text = normalise_paren_spacing(raw_text)
         # Strip morphology codes, keep lexical Strong's
         text = strip_morphology(raw_text)
         text_plain = strip_strongs(raw_text)
@@ -425,8 +579,11 @@ def insert_books(conn):
     )
 
 
-def build_plugin_db(output_path, verses, is_cuv=False):
-    """Build a plugin database (books + verses)."""
+def build_plugin_db(output_path, verses, is_cuv=False, notes=None):
+    """Build a plugin database (books + verses).
+
+    notes: {(book, chapter, verse): (heading, subscription)} from kjv_notes().
+    """
     if output_path.exists():
         output_path.unlink()
 
@@ -442,6 +599,12 @@ def build_plugin_db(output_path, verses, is_cuv=False):
             "INSERT OR IGNORE INTO verses (book, chapter, verse, text, text_plain) "
             "VALUES (?, ?, ?, ?, ?)",
             (book, chapter, verse, text, text_plain)
+        )
+    for (book, chapter, verse), (heading, subscription) in (notes or {}).items():
+        conn.execute(
+            "UPDATE verses SET heading = ?, subscription = ? "
+            "WHERE book = ? AND chapter = ? AND verse = ?",
+            (heading, subscription, book, chapter, verse)
         )
 
     conn.commit()
@@ -524,6 +687,10 @@ def main():
     tbesh_txt = download_if_missing(data_dir, "TBESH.txt")
     tbesg_txt = download_if_missing(data_dir, "TBESG.txt")
     strongs_csv = download_if_missing(data_dir, "strongs_definitions.csv")
+    usfm_zip = download_if_missing(data_dir, "eng-kjv_usfm.zip")
+    if hashlib.sha256(usfm_zip.read_bytes()).hexdigest() != EBIBLE_USFM_SHA256:
+        sys.exit(f"ERROR: {usfm_zip} is not the pinned eBible edition; "
+                 "re-check headings against it and update EBIBLE_USFM_SHA256")
 
     # -------------------------------------------------------------------
     # Step 2: Parse Bible modules
@@ -532,7 +699,8 @@ def main():
 
     print("  KJV with Strong's...")
     kjv_raw = extract_verses_txt(kjv_zip)
-    kjv_verses = parse_bss_module(kjv_raw)
+    kjv_verses = parse_bss_module(kjv_raw, space_parens=True,
+                                  corrections=KJV_CORRECTIONS)
     print(f"    {len(kjv_verses)} verses parsed")
 
     print("  CUV Simplified with Strong's...")
@@ -567,7 +735,8 @@ def main():
     # -------------------------------------------------------------------
     print("\nBuilding databases...")
 
-    build_plugin_db(output_dir / "kjv.sqlite", kjv_verses)
+    kjv_heads = kjv_notes(kjv_verses, parse_usfm_headings(usfm_zip))
+    build_plugin_db(output_dir / "kjv.sqlite", kjv_verses, notes=kjv_heads)
     build_plugin_db(output_dir / "cuv_simp.sqlite", cuv_simp_verses, is_cuv=True)
     build_plugin_db(output_dir / "cuv_trad.sqlite", cuv_trad_verses, is_cuv=True)
     build_strongs_db(
