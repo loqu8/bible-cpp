@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.build_bible_db import (
     extract_verses_txt,
+    normalise_paren_spacing,
     parse_bss_module,
     repair_tvm_tags,
     strip_morphology,
@@ -66,6 +67,42 @@ class RepairTvmTagsTest(unittest.TestCase):
             "persecute me: say unto my soul, I am thy salvation.")
 
 
+class NormaliseParenSpacingTest(unittest.TestCase):
+    def test_should_add_space_before_paren_when_glued_to_punctuation(self):
+        self.assertEqual(normalise_paren_spacing("and Casluhim{H3695},(out of whom"),
+                         "and Casluhim{H3695}, (out of whom")
+
+    def test_should_add_space_before_paren_when_glued_to_a_tag(self):
+        self.assertEqual(normalise_paren_spacing("of Bela{H1106}(the same"),
+                         "of Bela{H1106} (the same")
+
+    def test_should_remove_space_after_opening_paren(self):
+        self.assertEqual(normalise_paren_spacing("thither,( is it not"),
+                         "thither, (is it not")
+
+    def test_should_not_add_space_when_paren_opens_the_verse(self):
+        self.assertEqual(normalise_paren_spacing("( For the men of war"),
+                         "(For the men of war")
+
+    def test_should_leave_tvm_tags_unchanged(self):
+        text = "came{H3318}{(H8804)} Philistim{H6430},)"
+        self.assertEqual(normalise_paren_spacing(text), text)
+
+    def test_should_produce_spaced_plain_text_when_parsing(self):
+        line = ("1|10|14|And Pathrusim{H6625}, and Casluhim{H3695},(out of whom "
+                "came{H3318}{(H8804)} Philistim{H6430},) and Caphtorim{H3732}.")
+        [(_, _, _, text, text_plain)] = parse_bss_module(line, space_parens=True)
+        self.assertEqual(text_plain,
+                         "And Pathrusim, and Casluhim, (out of whom came "
+                         "Philistim,) and Caphtorim.")
+        self.assertIn("Casluhim{H3695}, (out", text)
+
+    def test_should_leave_cuv_parens_alone_when_not_asked(self):
+        line = "1|4|1|生了该隐{H7014}(就是得的意思)，便说"
+        [(_, _, _, text, _)] = parse_bss_module(line)
+        self.assertEqual(text, "生了该隐{H7014}(就是得的意思)，便说")
+
+
 @unittest.skipUnless(KJV_ZIP.exists(), "data/raw/kjv_strongs.zip not downloaded")
 class KjvCorpusTest(unittest.TestCase):
     @classmethod
@@ -87,7 +124,7 @@ class KjvCorpusTest(unittest.TestCase):
                          68873 + 28915 + 2485)
 
     def test_should_keep_verse_count_and_clean_every_verse(self):
-        verses = parse_bss_module(self.raw)
+        verses = parse_bss_module(self.raw, space_parens=True)
         self.assertEqual(len(verses), 31102)
         for book, chapter, verse, text, text_plain in verses:
             where = f"{book}:{chapter}:{verse}"
@@ -97,6 +134,7 @@ class KjvCorpusTest(unittest.TestCase):
             leftover = re.sub(r'\{[HG]\d+\}', '', text)
             self.assertNotIn("{", leftover, where)
             self.assertNotIn("}", leftover, where)
+            self.assertIsNone(re.search(r'\S\(|\( ', text_plain), where)
 
 
 if __name__ == "__main__":

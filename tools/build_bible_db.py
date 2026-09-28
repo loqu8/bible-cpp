@@ -246,6 +246,18 @@ def repair_tvm_tags(text):
     return re.sub(r'\{([HG]\d+)\)\}', r'{(\1)}', text)
 
 
+def normalise_paren_spacing(text):
+    """Space a KJV parenthesis the way printed editions do: "Bela (the same".
+
+    The SuperSearch KJV module glues the opening parenthesis to the preceding
+    word ("Casluhim,(out", "Bela{H1106}(the") in ~150 places and pads it on
+    the inside ("thither,( is", "( For") in 8. The TVM tag "{(" is left alone,
+    so run repair_tvm_tags() first.
+    """
+    text = re.sub(r'\(\s+', '(', text)
+    return re.sub(r'(?<=[^\s{])\(', ' (', text)
+
+
 def strip_morphology(text):
     """Remove morphology codes {(H####)} from Strong's-tagged text."""
     return re.sub(r'\{\([HG]\d+\)\}', '', text)
@@ -299,8 +311,11 @@ def strip_html(text):
 # Bible SuperSearch module parser
 # ---------------------------------------------------------------------------
 
-def parse_bss_module(verses_txt):
+def parse_bss_module(verses_txt, space_parens=False):
     """Parse Bible SuperSearch pipe-separated verses.txt.
+
+    space_parens: apply normalise_paren_spacing() (English only; CUV
+    parentheses follow Chinese typography and take no space).
 
     Format: book|chapter|verse|text|italics|strongs
     Returns list of (book, chapter, verse, text, text_plain).
@@ -321,6 +336,8 @@ def parse_bss_module(verses_txt):
             continue
 
         raw_text = repair_tvm_tags(parts[3])
+        if space_parens:
+            raw_text = normalise_paren_spacing(raw_text)
         # Strip morphology codes, keep lexical Strong's
         text = strip_morphology(raw_text)
         text_plain = strip_strongs(raw_text)
@@ -542,7 +559,7 @@ def main():
 
     print("  KJV with Strong's...")
     kjv_raw = extract_verses_txt(kjv_zip)
-    kjv_verses = parse_bss_module(kjv_raw)
+    kjv_verses = parse_bss_module(kjv_raw, space_parens=True)
     print(f"    {len(kjv_verses)} verses parsed")
 
     print("  CUV Simplified with Strong's...")
