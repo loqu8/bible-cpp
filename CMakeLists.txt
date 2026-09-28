@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(bible-cpp
-    VERSION 0.2.0
+    VERSION 0.4.0
     DESCRIPTION "Pure C++20 parallel-text scripture engine"
     LANGUAGES C CXX
 )
